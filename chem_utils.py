@@ -58,6 +58,16 @@ def cranknicolson(C, rightdiags, leftdiags, BC):
     L = np.zeros([n,n])
     boundary = np.zeros(n)
 
+    flat_C = np.ones(n)
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(nz):
+                # flattens to form a vector from matrix
+                # so that can loop over the single n
+                # variable to get the relevant value
+                index = i*ny*nz + j*nz + k
+                flat_C[index] = C[i,j,k]
+
     for i in range(n):
       for j in range(n):
           if i == j:
@@ -70,11 +80,17 @@ def cranknicolson(C, rightdiags, leftdiags, BC):
               else:
                 boundary[i] += (zsuperdiag_right - zsuperdiag_left) * BC['+z']
           if i - 1 == j:
+              # need to implement a wall boundary condition
               if xindex(j) != 0:
                 L[i,j] = zsubdiag_left
                 R[i,j] = zsubdiag_right
               else:
-                boundary[i] += (zsubdiag_right - zsubdiag_left) * BC['-z']
+                # BC['-z'] can't be set equal to zero as this would affect
+                # the concentration (dilution represented by mixing with a lower)
+                # concentration, and having a BC = 0 would lead to diffusion
+                # out of the regime into the -z BC, to remove affects along this
+                # boundary, it can be set equal to the lowest level
+                boundary[i] += (zsubdiag_right - zsubdiag_left) * flat_C[i]
           if i + (nz - 1) == j:
               if yindex(j) != ny - 1:
                 R[i,j] = ysuperdiag_right
@@ -100,15 +116,6 @@ def cranknicolson(C, rightdiags, leftdiags, BC):
               else:
                 boundary[i] += (xsubdiag_right - xsubdiag_left) * BC['-x']
 
-    flat_C = np.ones(n)
-    for i in range(nx):
-        for j in range(ny):
-            for k in range(nz):
-                # flattens to form a vector from matrix
-                # so that can loop over the single n
-                # variable to get the relevant value
-                index = i*ny*nz + j*nz + k
-                flat_C[index] = C[i,j,k]
 
     right = np.dot(R, flat_C) + boundary
     flat_result = np.linalg.solve(L,right)
