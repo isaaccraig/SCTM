@@ -3,14 +3,27 @@ import numpy as np
 
 def advection_diffusion(C, u, v, w, BC, del_t=0.01, del_x = 1000, del_y = 1000, del_z = 1000, D=1e4):
 
-    # Cijkn+1 - Cijkn = (-u∆t/4∆x)      (Ci+1jkn+1 - Ci-1jkn+1)
-    #               +   (-u∆t/4∆x)      (Ci+1jkn - Ci-1jkn)
-    #               +   (-v∆t/4∆x)      (Cij+1kn+1 - Cij-1kn+1)
-    #               +   (-v∆t/4∆x)      (Cij+1kn - Cij-1kn)
-    #               +   (-w∆t/4∆x)      (Cijk+1n+1 - Cijk-1n+1)
-    #               +   (-w∆t/4∆x)      (Cijk+1n - Cijk-1n)
-    #               +   (D∆t/2(∆x)^2)   (Ci+1jkn+1 + Ci-1jkn+1 + Cij+1kn+1 + Cij-1kn+1 + Cijk+1n+1 + Cijk-1n+1 - 6Cijkn+1)
-    #               +   (D∆t/2(∆x)^2)   (Ci+1jkn + Ci-1jkn + Cij+1kn + Cij-1kn + Cijk+1n + Cijk-1n - 6Cijkn)
+    # Cijkn+1 + (u∆t/4∆x) (Ci+1jkn+1 - Ci-1jkn+1) ... - (D∆t/2(∆x)^2) (Ci+1jkn+1 + Ci-1jkn+1 - 2 Cijkn+1) ... =
+    # Cijkn - (u∆t/4∆x) (Ci+1jk - Ci-1jkn) ... + (D∆t/2(∆x)^2) (Ci+1jkn + Ci-1jkn - 2 Cijkn) ...
+
+    # Wall Boundary Condition for z dimension : include a ghost point to inforce zero flux
+
+    # no mass flux :       0 = v/2∆x * (Ck+1 - Ck-1) ---> Ck+1 = Ck-1 --> Cij(-1) = Cij1
+    # no diffusion :       0 = D/∆x^2 * (Ck+1 + Ck-1 - 2Ck) ---> Ck+1 + Ck-1 = 2Ck ---> 2Ck+1 = 2Ck ---> Ck = Ck+1
+    # Ck+1 = Ck-1 = Ck
+
+    #       Cij0n+1 + (w∆t/4∆x) (Cij1n+1 - Cij(-1)n+1) ... - (D∆t/2(∆z)^2) (Cij1n+1 + Cij(-1)n+1 - 2 Cij0n+1) ... =
+    #       Cij0n - (w∆t/4∆x) (Cij1 - Cij(-1)n) ... + (D∆t/2(∆z)^2) (Cij1n + Cij(-1)n - 2 Cij0n) ...
+    # using Ck+1 = Ck-1
+    #       Cij0n+1 + (w∆t/4∆x) (0) ... - (D∆t/2(∆z)^2) (2Cij1n+1 - 2 Cij0n+1) ... =
+    #       Cij0n - (w∆t/4∆x) (0) ... + (D∆t/2(∆z)^2) (2Cij1n - 2 Cij0n) ...
+    #
+    # there exists diagonal changes from the removal of w∆t/4∆x = Crz/4
+    #      leftdiag = [1 + crx + cry + crz] ---> [1 + crx + cry]
+    #      rightdiag = [1 - crx - cry - crz] ---> [1 - crx - cry]
+
+    # now a double dependance on Cij1n ---> zsuperdiag = [ Crz/2 ]
+    # there exists no boundary dependance on Cij0n+1 from Cij0n such that this boundary term is zero : boundary[i] still = 0
 
     rx = D * del_t/(del_x^2)
     Crx = u * del_t/(del_x)
@@ -19,12 +32,15 @@ def advection_diffusion(C, u, v, w, BC, del_t=0.01, del_x = 1000, del_y = 1000, 
     rz = D * del_t/(del_z^2)
     Crz = v * del_t/(del_z)
 
-    leftdiags =  [1 + rx + ry + rz,  - ry/2 + Cry/4, - rx/2 - Crx/4,  - ry/2 + Cry/4, - ry/2 - Cry/4, - rz/2 + Crz/4, - rz/2 - Crz/4]
-    rightdiags = [1 + rx - ry - rz,  ry/2 + Cry/4, rx/2 - Crx/4, ry/2 + Cry/4, ry/2 - Cry/4,  rz/2 + Crz/4, rz/2 - Crz/4]
+    leftdiags =  [1 + rx + ry + rz,     - ry/2 + Cry/4,    - rx/2 - Crx/4,     - ry/2 + Cry/4,     - ry/2 - Cry/4,     - rz/2 + Crz/4,     - rz/2 - Crz/4]
+    rightdiags = [1 + rx - ry - rz,     ry/2 + Cry/4,      rx/2 - Crx/4,       ry/2 + Cry/4,       ry/2 - Cry/4,       rz/2 + Crz/4,       rz/2 - Crz/4]
 
-    return cranknicolson(C, rightdiags, leftdiags, BC)
+    noflux_diagonal_right = 1 + rx + ry
+    noflux_diagonal_left = 1 + rx - ry
 
-def cranknicolson(C, rightdiags, leftdiags, BC):
+    return cranknicolson(C, rightdiags, leftdiags, noflux_diagonal_right, noflux_diagonal_left, BC)
+
+def cranknicolson(C, rightdiags, leftdiags, noflux_diagonal_right, noflux_diagonal_left, BC):
 
     # diags in form :
     # [diagonal,  xsuperdiag, xsubdiag,
@@ -71,26 +87,24 @@ def cranknicolson(C, rightdiags, leftdiags, BC):
     for i in range(n):
       for j in range(n):
           if i == j:
+              if zindex(j) != 0:
                 R[i,j] = diagonal_right
                 L[i,j] = diagonal_left
+              else: # remove rz from diagonal dependance for boundary condition
+                R[i,j] = noflux_diagonal_right
+                L[i,j] = noflux_diagonal_left
           if i + 1 == j:
-              if xindex(j) != nx - 1:
+              if zindex(j) != nz - 1: # positive z boundary
                 R[i,j] = zsuperdiag_right
                 L[i,j] = zsuperdiag_left
               else:
                 boundary[i] += (zsuperdiag_right - zsuperdiag_left) * BC['+z']
           if i - 1 == j:
-              # need to implement a wall boundary condition
-              if xindex(j) != 0:
+              if zindex(j) != 0: # negative z boundary
                 L[i,j] = zsubdiag_left
                 R[i,j] = zsubdiag_right
               else:
-                # BC['-z'] can't be set equal to zero as this would affect
-                # the concentration (dilution represented by mixing with a lower)
-                # concentration, and having a BC = 0 would lead to diffusion
-                # out of the regime into the -z BC, to remove affects along this
-                # boundary, it can be set equal to the lowest level
-                boundary[i] += (zsubdiag_right - zsubdiag_left) * flat_C[i]
+                pass # subdiagonal and superdiagonal for z are zero here, no BC needed
           if i + (nz - 1) == j:
               if yindex(j) != ny - 1:
                 R[i,j] = ysuperdiag_right
@@ -104,7 +118,7 @@ def cranknicolson(C, rightdiags, leftdiags, BC):
               else:
                 boundary[i] += (ysubdiag_right - ysubdiag_left) * BC['-y']
           if i + (nz*ny - 1) == j:
-              if zindex(j) != nz - 1:
+              if xindex(j) != nx - 1:
                 R[i,j] = xsuperdiag_right
                 L[i,j] = xsuperdiag_left
               else:
