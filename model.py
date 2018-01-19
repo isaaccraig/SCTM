@@ -78,6 +78,15 @@ class Grid(object):
             print('\t {} : ppb \n'.format(chemical))
             print(self.values[chemical] * 1e9/2.5e19)
 
+    def check_neg(self, msg):
+        for label in self.chemicals:
+            for i in range(self.xdim):
+                for j in range(self.ydim):
+                    for k in range(self.zdim):
+                        if self.values[label][i,j,k] < 0:
+                            print("ERROR NEGATIVE {} from {}".format(label,msg))
+                            exit(1);
+
     def getArgList(self, i, j, k, hour):
         # set up ordered argList for input inmto chemfunction
         # the order is determined by the ordered list given in the parameter class
@@ -97,7 +106,7 @@ def sscalc_ho(values, i, j, k):
     return GLOB_pHOX/(values["conc_NO2"][i,j,k] * GLOB_c_m * 1.1E-11) # Sander et al. (2003)
 
 def sscalc_ho2(values, i, j, k):
-    return values["conc_RO2"][i,j,k]
+    return values["conc_AP"][i,j,k]
 
 steady_state_bool = { 'conc_NO2' : 0, 'conc_APN' : 0,'conc_AP'  : 0,'conc_NO'  : 0,'conc_O3'  : 0, 'conc_HNO3': 0,'conc_HO'  : 1,'conc_HO2' : 1,'conc_PROD': 0}
 steady_state_func = { 'conc_NO2' : None , 'conc_APN' : None,'conc_AP'  : None,'conc_NO'  : None,'conc_O3'  : None, 'conc_HNO3': None,'conc_HO'  : sscalc_ho,'conc_HO2' : sscalc_ho2,'conc_PROD': None}
@@ -167,25 +176,25 @@ def spinup(grid,case):
 
         print('spinup: chemistry at time {}\n'.format(t))
         ssc_chem(grid, t)
-        grid.test_settings()
 
 def ssc_chem(grid,hour):
     # step size controled chem
     delt = GLOB_chemical_dt
     exit_time = chem(grid, hour, delt, 0)
-    while exit_time < int(GLOB_time_step * 3600):
+    while exit_time != 10000:
         delt /= 2;
-        print('\nREDGLOB_UCING STEP SIZE TO {}'.format(delt))
+        if delt < 1e-4:
+            raise Exception("Requires Step Size below 1e-4")
+        print('\nREDUCING STEP SIZE TO {}'.format(delt))
         exit_time = chem(grid, hour, delt, exit_time)
 
 def chem(grid, hour, delt, starting_from):
     """ updates the gridentraions using the chemderiv function, iterating over each grid cell
      the results of the grid cells are independant, this could be parallelized """
     grid.chem_applied = True
-
     for t in np.arange(starting_from, int(GLOB_time_step * 3600), delt):
         # print status
-        if t % 50 == 0:
+        if t % 100 == 0:
             print('running chem at {} seconds'.format(t))
         # iterate over all grid points
         for i in range(grid.xdim):
@@ -216,7 +225,7 @@ def chem(grid, hour, delt, starting_from):
                             return t # return iteration that failed for wrapper
                         else:
                             grid.values[chemical][i,j,k] = ss_val # update gridentrations of ss chemicals
-                    return t # return iteration for wrapper
+    return 10000 # return iteration for wrapper
 
 ##########################################################
 ######################### MAIN  ##########################
@@ -297,15 +306,22 @@ def main():
         # cyling emision/deposition/advection+diffusion/chemistry
         print('emitting at time {}\n'.format(t))
         emit(grid,case)
+        grid.check_neg("emission")
+
         print('depositing at time {}\n'.format(t))
         deposit(grid,case)
-        print('advecting at time {}\n'.format(t))
-        advect(grid,case)
+        grid.check_neg("deposition")
+
+        #print('advecting at time {}\n'.format(t))
+        #advect(grid,case)
+        #grid.check_neg("advection")
+
         print('chemistry at time {}\n'.format(t))
         ssc_chem(grid,t)
+        grid.check_neg("chemistry")
 
-        grid.test_settings()
         t_index += 1
+        grid.print_out()
 
     # writes file
     nc_file.close()
