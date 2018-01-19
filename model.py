@@ -28,9 +28,9 @@ GLOB_final_time = 14
 GLOB_height = 100000 # centimeter box GLOB_height
 GLOB_spinup_duration = 0 # hours to spin up model
 
-GLOB_orderedLabels = ['grid_O3','grid_NO2','grid_NO','grid_AP','grid_APN','grid_HNO3','grid_HO', 'grid_HO2','grid_PROD']
-GLOB_time_range = np.arange(self.GLOB_initial_time, self.GLOB_final_time, self.GLOB_time_step)
-GLOB_spin_up_time_range = np.arange(self.GLOB_initial_time - self.GLOB_spinup_duration, self.GLOB_initial_time, self.GLOB_time_step)
+GLOB_orderedLabels = ['conc_O3','conc_NO2','conc_NO','conc_AP','conc_APN','conc_HNO3','conc_HO', 'conc_HO2','conc_PROD']
+GLOB_time_range = np.arange(GLOB_initial_time, GLOB_final_time, GLOB_time_step)
+GLOB_spin_up_time_range = np.arange(GLOB_initial_time - GLOB_spinup_duration, GLOB_initial_time, GLOB_time_step)
 
 ##########################################################
 ##################### CLASS DEF ##########################
@@ -64,7 +64,7 @@ class Grid(object):
         # chemicals and the values are xdim x ydim matrices of Concentrations
         self.chemicals = case.chemicals
         # The keys of this dictionary are the names of the chemicals
-        self.spinup()
+        spinup(self, case)
         # Spin up within Constructor to obtain gridentrations for later use
 
     def test_type(self, error_msg):
@@ -85,22 +85,22 @@ class Grid(object):
         argList = []
         for label in GLOB_orderedLabels:
             argList.append(self.values[label][i,j,k])
-        return [GLOB_time_step, hour, temp(hour), GLOB_c_m, GLOB_height] + argList
+        return [GLOB_time_step, hour, get_temp(hour), GLOB_c_m, GLOB_height] + argList
 
 ##########################################################
 ##################### STEADY STATE #######################
 ##########################################################
 
 def sscalc_ho(values, i, j, k):
-    if values["grid_NO2"][i,j,k] == 0:
+    if values["conc_NO2"][i,j,k] == 0:
         raise error('Divide by zero in HO ss : no2 is zero')
-    return GLOB_pHOX/(values["grid_NO2"][i,j,k] * GLOB_c_m * 1.1E-11) # Sander et al. (2003)
+    return GLOB_pHOX/(values["conc_NO2"][i,j,k] * GLOB_c_m * 1.1E-11) # Sander et al. (2003)
 
 def sscalc_ho2(values, i, j, k):
-    return values["grid_RO2"][i,j,k]
+    return values["conc_RO2"][i,j,k]
 
-steady_state_bool = { 'grid_NO2' : 0, 'grid_APN' : 0,'grid_AP'  : 0,'grid_NO'  : 0,'grid_O3'  : 0, 'grid_HNO3': 0,'grid_HO'  : 1,'grid_HO2' : 1,'grid_PROD': 0}
-steady_state_func = { 'grid_NO2' : None , 'grid_APN' : None,'grid_AP'  : None,'grid_NO'  : None,'grid_O3'  : None, 'grid_HNO3': None,'grid_HO'  : sscalc_ho,'grid_HO2' : sscalc_ho2,'grid_PROD': None}
+steady_state_bool = { 'conc_NO2' : 0, 'conc_APN' : 0,'conc_AP'  : 0,'conc_NO'  : 0,'conc_O3'  : 0, 'conc_HNO3': 0,'conc_HO'  : 1,'conc_HO2' : 1,'conc_PROD': 0}
+steady_state_func = { 'conc_NO2' : None , 'conc_APN' : None,'conc_AP'  : None,'conc_NO'  : None,'conc_O3'  : None, 'conc_HNO3': None,'conc_HO'  : sscalc_ho,'conc_HO2' : sscalc_ho2,'conc_PROD': None}
 
 ##########################################################
 #################### MAIN GLOB_UTILITIES #################
@@ -139,7 +139,7 @@ def deposit(grid,case):
     # conversions accordingly
     grid.deposited = True
     for chemical in grid.chemicals:
-        vdep = case.depGLOB_Vel[chemical]
+        vdep = case.depVel[chemical]
         d_grid = grid.values[chemical] * vdep * (GLOB_time_step * 3600) * 1/GLOB_height
         # molec/cm3 = vdep {'cm/s'} * gridentration (molec/cm3) * dt (sec)/GLOB_height (cm)
         grid.values[chemical] += d_grid
@@ -151,7 +151,7 @@ def advect(grid,case):
         grid.values[chemical] = advection_diffusion(  grid.values[chemical], GLOB_U, GLOB_V,
                             GLOB_W, case.bc[chemical], del_t = GLOB_time_step)
 
-def spinup(grid, case):
+def spinup(grid,case):
     # Spin up over the specified time period
     grid.spun_up = True
     for t in np.arange(GLOB_initial_time, GLOB_spinup_duration + GLOB_initial_time, GLOB_time_step):
@@ -188,31 +188,31 @@ def chem(grid, hour, delt, starting_from):
         if t % 50 == 0:
             print('running chem at {} seconds'.format(t))
         # iterate over all grid points
-        for i in grid.xdim:
-            for j in grid.ydim:
-                for k in grid.zdim:
+        for i in range(grid.xdim):
+            for j in range(grid.ydim):
+                for k in range(grid.zdim):
                     # combine the static arguments with the chemical arguments for the cythonized kinetics function call
                     args = grid.getArgList(i, j, k, t)
                     results = chemderiv.chem_solver(*args)
 
                     # determine the change in each chemical
-                    for chemical in grid.chemicals if not steady_state_bool[chemical]:
+                    for chemical in [chem for chem in grid.chemicals if not steady_state_bool[chem]]:
                         Ci = grid.values[chemical][i,j,k]
                         dCdt = results[chemical] * delt
 
                         if Ci + dCdt < 0:
-                            print("GLOB_WARNING NEGATIGLOB_VE: Ci = {}, dCdt * dt = {} at {}({},{},{},{})".format(Ci, dCdt, chemical, i, j, k, t))
+                            print("WARNING NEGATIVE: Ci = {}, dCdt * dt = {} at {}({},{},{},{})".format(Ci, dCdt, chemical, i, j, k, t))
                             return t # return iteration that failed for wrapper
                         else: # not negative
                             grid.values[chemical][i,j,k] += dCdt # update gridentrations of non-ss chemicals
 
                     # call relevant methods to calculate the steady state gridentrations of chemicals if necessary
                     # must be done after all non-ss are updated accordingly
-                    for chemical in grid.chemicals if steady_state_bool[chemical]:
+                    for chemical in [chem for chem in grid.chemicals if steady_state_bool[chem]]:
                         f = steady_state_func[chemical]
                         ss_val = f(grid.values, i, j, k)
                         if ss_val < 0:
-                            print("GLOB_WARNING SS NEGATIGLOB_VE: Ci = {}, dCdt * dt = {} at {}({},{},{},{})".format(Ci, dCdt, chemical, i, j, k, t))
+                            print("WARNING SS NEGATIVE: Ci = {}, dCdt * dt = {} at {}({},{},{},{})".format(Ci, dCdt, chemical, i, j, k, t))
                             return t # return iteration that failed for wrapper
                         else:
                             grid.values[chemical][i,j,k] = ss_val # update gridentrations of ss chemicals
@@ -231,15 +231,20 @@ def get_args():
 def get_case():
     """ Get the case from command line arguments (calls get_args), see imported dependancy cases.py """
     case_nm = str(get_args().case)
-    if case_nm not in case_dict.keys:
+    if case_nm not in list(case_dict.keys()):
         raise BaseException("No known case : {}".format(case_nm))
     return case_dict[case_nm]
+
+def get_filename():
+    case_nm = str(get_args().case)
+    return case_nm
 
 def main():
     """ Main Driver Function """
 
     case = get_case();
     grid = Grid(case,5,5,1)
+    filename = get_filename()
 
     # create netcdf4 file to write data
     nc_file = netCDF4.Dataset('{}.nc'.format(filename),'w', format='NETCDF4_CLASSIC')
@@ -256,20 +261,20 @@ def main():
     # which will serve as the the chemical dimensions
     # where xdim, ydim, and zdim are first converted into meters
     # before added as variables
-    xvar = nc_file.createGLOB_Variable('xdim', np.int32, ('xdim'))
+    xvar = nc_file.createVariable('xdim', np.int32, ('xdim'))
     xvar[:] = GLOB_height/100 * np.arange(grid.xdim)
     xvar.units = 'meters'
 
-    yvar = nc_file.createGLOB_Variable('ydim', np.int32, ('ydim'))
+    yvar = nc_file.createVariable('ydim', np.int32, ('ydim'))
     yvar[:] = GLOB_height/100 * np.arange(grid.ydim)
     yvar.units = 'meters'
 
-    zvar = nc_file.createGLOB_Variable('zdim', np.int32, ('zdim'))
+    zvar = nc_file.createVariable('zdim', np.int32, ('zdim'))
     zvar[:] = GLOB_height/100 * np.arange(grid.zdim)
     zvar.units = 'meters'
 
     # create the dimimension in hours
-    tiemvar = nc_file.createGLOB_Variable('time', np.float32, ('time'))
+    tiemvar = nc_file.createVariable('time', np.float32, ('time'))
     tiemvar[:] = GLOB_time_range
     tiemvar.units = 'hours'
 
@@ -277,7 +282,7 @@ def main():
     # time, xdim, ydim, and zdim
     cvars = dict()
     for chemical in grid.chemicals:
-        cvars[chemical] = nc_file.createGLOB_Variable(chemical, np.float64, ('xdim','ydim','zdim','time'))
+        cvars[chemical] = nc_file.createVariable(chemical, np.float64, ('xdim','ydim','zdim','time'))
         cvars[chemical].units = 'molec/cm3'
 
     # cycle over time range, writing data at each time point to the netcdf file
