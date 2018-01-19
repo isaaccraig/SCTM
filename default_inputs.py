@@ -1,27 +1,8 @@
 
 
-import numpy as np
+
 
 uniform_bc = lambda val: { '-x': val,'+x': val,'-y': val,'+y': val,'-z': val,'+z': val}
-uniform_depVel = lambda val: { 'conc_NO2' : val, 'conc_APN' : val, 'conc_AP'  : val, 'conc_NO'  : val, 'conc_O3'  : val, 'conc_HNO3': val, 'conc_HO'  : val, 'conc_HO2' : val, 'conc_PROD': val}
-no_depVel = uniform_depVel(0)
-default_matrix = lambda val : val * np.ones([5, 5, 5])
-
-def bottom_centered_matrix(val):
-    m = np.zeros([5, 5, 5])
-    m[1,1,1] = val
-    return m
-
-high_urban_AP_emissions = { # molec/cm3s
-                                                'conc_NO2' : default_matrix(0),
-                                                'conc_APN' : default_matrix(0),
-                                                'conc_AP'  : bottom_centered_matrix(20e6), # 5e6 Lafranchi 2009 obs : 1e6-10e6 molec/cm3s
-                                                'conc_NO'  : default_matrix(1e6),
-                                                'conc_O3'  : default_matrix(0),
-                                                'conc_HNO3': default_matrix(0),
-                                                'conc_HO'  : default_matrix(0),
-                                                'conc_HO2' : default_matrix(0),
-                                                'conc_PROD': default_matrix(0)}
 realistic_bc = {                                'conc_NO2' : uniform_bc(0.45 * 2.5e19/1e9),
                                                 'conc_APN' : uniform_bc(300 * 2.5e19/1e12),
                                                 'conc_AP'  : uniform_bc(23 * 2.5e19/1e12),
@@ -31,7 +12,12 @@ realistic_bc = {                                'conc_NO2' : uniform_bc(0.45 * 2
                                                 'conc_HO'  : uniform_bc(0.28 * 2.5e19/1e12),
                                                 'conc_HO2' : uniform_bc(23 * 2.5e19/1e12),
                                                 'conc_PROD': uniform_bc(0)}
-realistic_depVel = { 'conc_NO2' : 0, 'conc_APN' : 1, 'conc_AP'  : 0, 'conc_NO'  : 0, 'conc_O3'  : 0, 'conc_HNO3': 1, 'conc_HO'  : 0, 'conc_HO2' : 0, 'conc_PROD': 0}
+
+uniform_depVel = lambda val: { 'conc_NO2' : val, 'conc_APN' : val, 'conc_AP'  : val, 'conc_NO'  : val, 'conc_O3'  : val, 'conc_HNO3': val, 'conc_HO'  : val, 'conc_HO2' : val, 'conc_PROD': val}
+no_depVel = uniform_depVel(0)
+realistic_depVel = lambda val: { 'conc_NO2' : 0, 'conc_APN' : 1, 'conc_AP'  : 0, 'conc_NO'  : 0, 'conc_O3'  : 0, 'conc_HNO3': 1, 'conc_HO'  : 0, 'conc_HO2' : 0, 'conc_PROD': 0}
+
+default_matrix = lambda val : val * np.ones([5, 5, 5])
 realistic_initial = lambda xdim, ydim, zdim: {  'conc_NO2' : 0.45 * 2.5e19/1e9 * np.ones([xdim, ydim, zdim]),
                                                 'conc_APN' : 300 * 2.5e19/1e12 * np.ones([xdim, ydim, zdim]),
                                                 'conc_AP'  : 23 * 2.5e19/1e12 * np.ones([xdim, ydim, zdim]),
@@ -44,21 +30,10 @@ realistic_initial = lambda xdim, ydim, zdim: {  'conc_NO2' : 0.45 * 2.5e19/1e9 *
 realistic_emissions = { # molec/cm3s
                                                 'conc_NO2' : default_matrix(0),
                                                 'conc_APN' : default_matrix(0),
-                                                'conc_AP'  : default_matrix(5e6), # 5e6 Lafranchi 2009 obs : 1e6-10e6 molec/cm3s
+                                                'conc_AP'  : default_matrix(5e6), # Lafranchi 2009 obs : 1e6-10e6 molec/cm3s
                                                 'conc_NO'  : default_matrix(1e6),
                                                 'conc_O3'  : default_matrix(0),
                                                 'conc_HNO3': default_matrix(0),
                                                 'conc_HO'  : default_matrix(0),
                                                 'conc_HO2' : default_matrix(0),
                                                 'conc_PROD': default_matrix(0)}
-
-
-class Case:
-    def __init__(self, bc, emis, depVel, initial):
-        self.bc = bc
-        self.emissions = emis
-        self.depVel = depVel
-        self.initial= initial
-
-inputcase = { 'realisitic' : Case(realistic_bc, realistic_emissions, realistic_depVel, realistic_initial(5,5,5)),
-    'high_urban_AP' : Case(realistic_bc, realistic_emissions, realistic_depVel, realistic_initial)}

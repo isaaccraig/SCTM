@@ -3,22 +3,38 @@ import chemderiv
 import matplotlib.pyplot as plt
 import math
 from chem_utils import advection_diffusion
-import default_inputs as inp
+from cases import *
 import numpy as np
 import netCDF4
 import time
 import argparse
 
 ##########################################################
-##################### CLASS DEF ##########################
+######################## PARAMS ##########################
 ##########################################################
 
-# Turn of Dournal cycle
-# cut down domain
-# rotate domain along wind direction
-# consistent wind direction to remove other sources of variablity
-# read up more on the EOF decomposition SVD math
-# ramping up AP
+################ Physical Parameters ################
+GLOB_c_m = 2.5e19 # air dens in molecules/cm3
+GLOB_pHOX = 2.25 * GLOB_c_m/1e9 * 1/3600  # Dillon (2002) GLOB_VALGLOB_UE FOR PHOX # ppb/hr * C_M/1e9 = molec/cm^3hr * hr/3600s = molec/cm3s
+GLOB_U = 2
+GLOB_V = 2
+GLOB_W = 0
+
+################ Model Parameters ################
+GLOB_time_step = 0.5 # in hours for operator split
+GLOB_chemical_dt = 1 # in seconds for within chem func
+GLOB_initial_time = 12
+GLOB_final_time = 14
+GLOB_height = 100000 # centimeter box GLOB_height
+GLOB_spinup_duration = 0 # hours to spin up model
+
+GLOB_orderedLabels = ['grid_O3','grid_NO2','grid_NO','grid_AP','grid_APN','grid_HNO3','grid_HO', 'grid_HO2','grid_PROD']
+GLOB_time_range = np.arange(self.GLOB_initial_time, self.GLOB_final_time, self.GLOB_time_step)
+GLOB_spin_up_time_range = np.arange(self.GLOB_initial_time - self.GLOB_spinup_duration, self.GLOB_initial_time, self.GLOB_time_step)
+
+##########################################################
+##################### CLASS DEF ##########################
+##########################################################
 
 class DebugBreak(BaseException):
     pass
@@ -27,34 +43,27 @@ class OddTypeError(BaseException):
     pass
 
 class Grid(object):
-    def __init__(self, params, depositon_on = True, emission_on=True, advection_on=True, chemistry_on=True):
+    def __init__(self, case, xdim, ydim, zdim):
         # Constructor
-        self.advection_on = advection_on
-        if not advection_on:
-            print('\nSettings Reminder: No Advection')
+        assert xdim == case.xdim
+        assert ydim == case.ydim
+        assert zdim == case.zdim
 
-        self.chemistry_on = chemistry_on
-        if not chemistry_on:
-            print('\nSettings Reminder: No Chemistry')
+        self.xdim = xdim
+        self.ydim = ydim
+        self.zdim = zdim
 
-        self.emission_on = emission_on
-        if not emission_on:
-            print('\nSettings Reminder: No Emission')
+        self.chem_applied = False
+        self.advected = False
+        self.emitted = False
+        self.deposited = False
+        self.spun_up = False
 
-        self.depositon_on = depositon_on
-        if not depositon_on:
-            print('\nSettings Reminder: No Deposition')
-
-        self.chem_applied, self.advected, self.emitted, self.deposited, self.spun_up = False, False, False, False, False
-        self.exit_time = 0
-
-        self.values = params.initial
+        self.values = case.initial
         # Initial is a dictionary whose keys are the string names of
-        # chemicals and the values are xdim x ydim matrices of Grid
-        self.chemicals = params.initial.keys()
+        # chemicals and the values are xdim x ydim matrices of Concentrations
+        self.chemicals = case.chemicals
         # The keys of this dictionary are the names of the chemicals
-        self.params = params
-        # the container class of all physical parameters
         self.spinup()
         # Spin up within Constructor to obtain gridentrations for later use
 
@@ -69,221 +78,145 @@ class Grid(object):
             print('\t {} : ppb \n'.format(chemical))
             print(self.values[chemical] * 1e9/2.5e19)
 
-    def test_settings(self):
-        # Advection
-        if not self.advection_on:
-            assert(not self.advected)
-        else:
-            assert(self.advected)
-        # Emission
-        if not self.emission_on:
-            assert(not self.emitted)
-        else:
-            assert(self.emitted)
-        # Chemistry
-        if not self.chemistry_on:
-            assert(not self.chem_applied)
-        else:
-            assert(self.chem_applied)
-        # Deposition
-        if not self.depositon_on:
-            assert(not self.deposited)
-        else:
-            assert(self.deposited)
-
-    def getArgList(self, i, j, k):
+    def getArgList(self, i, j, k, hour):
         # set up ordered argList for input inmto chemfunction
         # the order is determined by the ordered list given in the parameter class
         labels = self.chemicals;
         argList = []
-        for label in self.params.orderedLabels:
+        for label in GLOB_orderedLabels:
             argList.append(self.values[label][i,j,k])
-        return argList
+        return [GLOB_time_step, hour, temp(hour), GLOB_c_m, GLOB_height] + argList
 
-    def emit(self):
-        # Uses emissions data to alter gridentrations, dealing with unit
-        # conversions accordingly
-        if self.emission_on:
-            self.emitted = True
-            for chemical in self.chemicals:
-                emis = self.params.emissions[chemical]
-                scalar = (self.params.time_step * 3600)
-                d_grid = scalar * emis
-                # molecules/cm^3 =  E (molec cm^-3 s^-1) * dt (hr) * 3600s/hr
-                self.values[chemical] = self.values[chemical] + d_grid
+##########################################################
+##################### STEADY STATE #######################
+##########################################################
 
-    def deposit(self):
-        # Uses deposition velocity data to alter gridentrations, dealing with unit
-        # conversions accordingly
-        if self.depositon_on:
-            self.deposited = True
-            for chemical in self.chemicals:
-                vdep = self.params.depVel[chemical]
-                d_grid = self.values[chemical] * vdep * (self.params.time_step * 3600) * 1/self.params.height
-                # molec/cm3 = vdep {'cm/s'} * gridentration (molec/cm3) * dt (sec)/height (cm)
-                self.values[chemical] += d_grid
+def sscalc_ho(values, i, j, k):
+    if values["grid_NO2"][i,j,k] == 0:
+        raise error('Divide by zero in HO ss : no2 is zero')
+    return GLOB_pHOX/(values["grid_NO2"][i,j,k] * GLOB_c_m * 1.1E-11) # Sander et al. (2003)
 
-    def advect(self):
-        # Use crank nicolson to deal with advection and diffusion
-        if self.advection_on:
-            self.advected = True
-            for chemical in self.chemicals:
-                self.values[chemical] = advection_diffusion(  self.values[chemical], self.params.U, self.params.V,
-                                                    self.params.W, self.params.bc[chemical], del_t = self.params.time_step)
+def sscalc_ho2(values, i, j, k):
+    return values["grid_RO2"][i,j,k]
 
-    def round_and_check_neg(self, t):
-        for chemical in self.chemicals:
-            for i in range(self.values[chemical].shape[0]):
-                for j in range(self.values[chemical].shape[1]):
-                    for k in range(self.values[chemical].shape[2]):
-                        self.values[chemical][i,j,k] = round(self.values[chemical][i,j,k], 10)
-                        if self.values[chemical][i,j,k] < 0:
-                            print("{}-{}-{}-{}-{} = {}".format(chemical, i, j, k, t, self.values[chemical][i,j,k]))
-                            raise OddTypeError
+steady_state_bool = { 'grid_NO2' : 0, 'grid_APN' : 0,'grid_AP'  : 0,'grid_NO'  : 0,'grid_O3'  : 0, 'grid_HNO3': 0,'grid_HO'  : 1,'grid_HO2' : 1,'grid_PROD': 0}
+steady_state_func = { 'grid_NO2' : None , 'grid_APN' : None,'grid_AP'  : None,'grid_NO'  : None,'grid_O3'  : None, 'grid_HNO3': None,'grid_HO'  : sscalc_ho,'grid_HO2' : sscalc_ho2,'grid_PROD': None}
 
-    def spinup(self):
-        # Spin up over the specified time period
-        self.spun_up = True
-        for t in np.arange(self.params.initial_time, self.params.spinup_duration + self.params.initial_time, self.params.time_step):
-
-            self.round_and_check_neg(t)
-            print('spinup : emitting at time {}\n'.format(t))
-            self.emit()
-
-            self.round_and_check_neg(t)
-            print('spinup : depositing at time {}\n'.format(t))
-            self.deposit()
-
-            self.round_and_check_neg(t)
-            print('spinup : advecting at time {}\n'.format(t))
-            self.advect()
-
-            self.round_and_check_neg(t)
-            print('spinup: chemistry at time {}\n'.format(t))
-            self.ssc_chem(t)
-
-            self.test_settings()
-
-    def ssc_chem(self,hour):
-        # step size controled chem
-        delt = self.params.chemical_dt
-        success = self.chem(hour, delt, 0)
-        while not success:
-            delt /= 2;
-            print('\nREDUCING STEP SIZE TO {}'.format(delt))
-            success = self.chem(hour, delt, self.exit_time)
-
-    def chem(self, hour, delt, starting_from):
-        # updates the gridentraions using the chemderiv function, iterating over each grid cell
-        # the results of the grid cells are independant, this could be parallelized
-        if self.chemistry_on:
-            self.chem_applied = True
-            for t in np.arange(starting_from, int(self.params.time_step * 3600), delt):
-                if t%50 == 0:
-                    print('running chem at {} seconds'.format(t))
-                for i in range(self.params.xdim):
-                    for j in range(self.params.ydim):
-                        for k in range(self.params.zdim):
-                            # combine the static arguments with the chemical arguments for the cythonized kinetics function call
-                            args = [self.params.time_step, hour, get_temp(hour), self.params.c_m, self.params.height]
-                            args += self.getArgList(i, j, k)
-                            results = chemderiv.chem_solver(*args)
-                            # call relevant methods to calculate the steady state gridentrations of chemicals if necessary
-                            for chemical in self.chemicals:
-                                Ci = self.values[chemical][i,j,k]
-                                dCdt = results[chemical] * delt
-                                if Ci + dCdt < 0:
-                                    print("WARNING NEGATIVE: Ci = {}, dCdt * dt = {} at {}({},{},{},{})".format(Ci, dCdt, chemical, i, j, k, t))
-                                    self.exit_time = t
-                                    return False
-                                else:
-                                    self.values[chemical][i,j,k] += dCdt # dt in seconds
-                            for chemical in self.chemicals:
-                                if self.params.steady_state_bool[chemical]:
-                                    f = self.params.steady_state_func[chemical]
-                                    args = [self.values[dependancy][i,j,k] for dependancy in self.params.ss_dependancies[chemical]]
-                                    ss_val = f(*args)
-                                    if ss_val < 0:
-                                        print("WARNING SS NEGATIVE: Ci = {}, dCdt * dt = {} at {}({},{},{},{})".format(Ci, dCdt, chemical, i, j, k, t))
-                                        self.exit_time = t
-                                        return False
-                                    else:
-                                        self.values[chemical][i,j,k] = ss_val
-        return True
-
-class ModelParams(object):
-    # Initiates and Organizes Constant Properties for Model
-    # Static Container Class
-
-    def __init__(self, case, xdim=5, ydim=5, zdim=5, spinup_duration=0):
-
-        self.time_step = 0.5 # in hours for operator split
-        self.chemical_dt = 1 # in seconds for within chem func
-        self.initial_time = 12
-        self.final_time = 14
-        self.c_m = 2.5e19; # air dens in molecules/cm3
-        self.orderedLabels = ['grid_O3',
-                              'grid_NO2',
-                              'grid_NO',
-                              'grid_AP',
-                              'grid_APN',
-                              'grid_HNO3',
-                              'grid_HO',
-                              'grid_HO2',
-                              'grid_PROD']
-        self.height = 100000; # centimeter box height
-        self.pHOX = 2.25 * self.c_m/1e9 * 1/3600  # Dillon (2002) VALUE FOR PHOX # ppb/hr * C_M/1e9 = molec/cm^3hr * hr/3600s = molec/cm3s
-        self.xdim = xdim
-        self.ydim = ydim
-        self.zdim = zdim
-        self.spinup_duration = spinup_duration; # hours to spin up model
-        self.bc = case.bc
-        self.emissions = case.emissions # mol km^-2 hr^-1
-        self.initial = case.initial # molec/cm3
-        self.depVel = case.depVel # cm/s
-        self.steady_state_bool = {
-                            'grid_NO2' : 0,
-                            'grid_APN' : 0,
-                            'grid_AP'  : 0,
-                            'grid_NO'  : 0,
-                            'grid_O3'  : 0,
-                            'grid_HNO3': 0,
-                            'grid_HO'  : 1,
-                            'grid_HO2' : 1,
-                            'grid_PROD': 0}
-        self.U = 2
-        self.V = 2
-        self.W = 0
-
-        def calc_ho(no2):
-            if no2 == 0:
-                raise error('Divide by zero in HO ss : no2 is zero')
-            return self.pHOX/(no2 * self.c_m * 1.1E-11) # Sander et al. (2003)
-
-        self.steady_state_func = {
-            'grid_HO'  : calc_ho,
-            'grid_HO2' : lambda ro2: ro2}
-        self.ss_dependancies = { 'grid_HO'  : ['grid_NO2'] , 'grid_HO2' : ['grid_AP'] }
-        self.time_range = np.arange(self.initial_time, self.final_time, self.time_step)
-        self.spin_up_time_range = np.arange(self.initial_time - self.spinup_duration, self.initial_time, self.time_step)
-
+##########################################################
+#################### MAIN GLOB_UTILITIES #################
+##########################################################
 
 def get_temp(t):
-    # Pearson Type III Model for Diurnal Temperature Cycle
-    Tmin, Trange, a = 15, 15, 9
-    if t > 24:
-        t = t - 24
-    if t <= 5:
-        t += 10
-    elif t >= 14:
-        t -= 14
-    elif t > 5 and t < 14:
-        t -= 14
-    if t < 0:
-        gam = 0.24
-    else:
-        gam = 0.8
-    return 273 + Tmin + Trange * (math.exp(-gam * t) * (1 + t/a) ** (gam*a))
+        # Pearson Type III Model for Diurnal Temperature Cycle
+        Tmin, Trange, a = 15, 15, 9
+        if t > 24:
+            t = t - 24
+        if t <= 5:
+            t += 10
+        elif t >= 14:
+            t -= 14
+        elif t > 5 and t < 14:
+            t -= 14
+        if t < 0:
+            gam = 0.24
+        else:
+            gam = 0.8
+        return 273 + Tmin + Trange * (math.exp(-gam * t) * (1 + t/a) ** (gam*a))
+
+def emit(grid,case):
+    # GLOB_Uses emissions data to alter gridentrations, dealing with unit
+    # conversions accordingly
+    grid.emitted = True
+    for chemical in grid.chemicals:
+        emis = case.emissions[chemical]
+        scalar = (GLOB_time_step * 3600)
+        d_grid = scalar * emis
+        # molecules/cm^3 =  E (molec cm^-3 s^-1) * dt (hr) * 3600s/hr
+        grid.values[chemical] = grid.values[chemical] + d_grid
+
+def deposit(grid,case):
+    # GLOB_Uses deposition velocity data to alter gridentrations, dealing with unit
+    # conversions accordingly
+    grid.deposited = True
+    for chemical in grid.chemicals:
+        vdep = case.depGLOB_Vel[chemical]
+        d_grid = grid.values[chemical] * vdep * (GLOB_time_step * 3600) * 1/GLOB_height
+        # molec/cm3 = vdep {'cm/s'} * gridentration (molec/cm3) * dt (sec)/GLOB_height (cm)
+        grid.values[chemical] += d_grid
+
+def advect(grid,case):
+    # GLOB_Use crank nicolson to deal with advection and diffusion
+    grid.advected = True
+    for chemical in grid.chemicals:
+        grid.values[chemical] = advection_diffusion(  grid.values[chemical], GLOB_U, GLOB_V,
+                            GLOB_W, case.bc[chemical], del_t = GLOB_time_step)
+
+def spinup(grid, case):
+    # Spin up over the specified time period
+    grid.spun_up = True
+    for t in np.arange(GLOB_initial_time, GLOB_spinup_duration + GLOB_initial_time, GLOB_time_step):
+
+        print('spinup : emitting at time {}\n'.format(t))
+        emit(grid)
+
+        print('spinup : depositing at time {}\n'.format(t))
+        deposit(grid)
+
+        print('spinup : advecting at time {}\n'.format(t))
+        advect(grid)
+
+        print('spinup: chemistry at time {}\n'.format(t))
+        ssc_chem(grid, t)
+        grid.test_settings()
+
+def ssc_chem(grid,hour):
+    # step size controled chem
+    delt = GLOB_chemical_dt
+    exit_time = chem(grid, hour, delt, 0)
+    while exit_time < int(GLOB_time_step * 3600):
+        delt /= 2;
+        print('\nREDGLOB_UCING STEP SIZE TO {}'.format(delt))
+        exit_time = chem(grid, hour, delt, exit_time)
+
+def chem(grid, hour, delt, starting_from):
+    """ updates the gridentraions using the chemderiv function, iterating over each grid cell
+     the results of the grid cells are independant, this could be parallelized """
+    grid.chem_applied = True
+
+    for t in np.arange(starting_from, int(GLOB_time_step * 3600), delt):
+        # print status
+        if t % 50 == 0:
+            print('running chem at {} seconds'.format(t))
+        # iterate over all grid points
+        for i in grid.xdim:
+            for j in grid.ydim:
+                for k in grid.zdim:
+                    # combine the static arguments with the chemical arguments for the cythonized kinetics function call
+                    args = grid.getArgList(i, j, k, t)
+                    results = chemderiv.chem_solver(*args)
+
+                    # determine the change in each chemical
+                    for chemical in grid.chemicals if not steady_state_bool[chemical]:
+                        Ci = grid.values[chemical][i,j,k]
+                        dCdt = results[chemical] * delt
+
+                        if Ci + dCdt < 0:
+                            print("GLOB_WARNING NEGATIGLOB_VE: Ci = {}, dCdt * dt = {} at {}({},{},{},{})".format(Ci, dCdt, chemical, i, j, k, t))
+                            return t # return iteration that failed for wrapper
+                        else: # not negative
+                            grid.values[chemical][i,j,k] += dCdt # update gridentrations of non-ss chemicals
+
+                    # call relevant methods to calculate the steady state gridentrations of chemicals if necessary
+                    # must be done after all non-ss are updated accordingly
+                    for chemical in grid.chemicals if steady_state_bool[chemical]:
+                        f = steady_state_func[chemical]
+                        ss_val = f(grid.values, i, j, k)
+                        if ss_val < 0:
+                            print("GLOB_WARNING SS NEGATIGLOB_VE: Ci = {}, dCdt * dt = {} at {}({},{},{},{})".format(Ci, dCdt, chemical, i, j, k, t))
+                            return t # return iteration that failed for wrapper
+                        else:
+                            grid.values[chemical][i,j,k] = ss_val # update gridentrations of ss chemicals
+                    return t # return iteration for wrapper
 
 ##########################################################
 ######################### MAIN  ##########################
@@ -292,23 +225,21 @@ def get_temp(t):
 def get_args():
     """ Get the command line arguments and return an instance of an argparse namespace """
     parser = argparse.ArgumentParser(description='Returns a netcdf file of Chemical gridentrations')
-    parser.add_argument('--case', help='base case to run')
+    parser.add_argument('--case', help='case to use')
     return parser.parse_args()
+
+def get_case():
+    """ Get the case from command line arguments (calls get_args), see imported dependancy cases.py """
+    case_nm = str(get_args().case)
+    if case_nm not in case_dict.keys:
+        raise BaseException("No known case : {}".format(case_nm))
+    return case_dict[case_nm]
 
 def main():
     """ Main Driver Function """
 
-    case_name = str(get_args().case)
-    filename = case_name
-
-    if case_name not in inp.inputcase.keys():
-        raise BaseException("Unknown Case : {}".format(case_name) )
-
-    case = inp.inputcase[case_name]
-
-    # initiate classes
-    p = ModelParams(case)
-    grid = Grid(p)
+    case = get_case();
+    grid = Grid(case,5,5,1)
 
     # create netcdf4 file to write data
     nc_file = netCDF4.Dataset('{}.nc'.format(filename),'w', format='NETCDF4_CLASSIC')
@@ -316,64 +247,57 @@ def main():
 
     # create the cartesian and time dimesions, which must be Also
     # creates as variables
-    xdim =      nc_file.createDimension('xdim',p.xdim)
-    ydim =      nc_file.createDimension('ydim',p.ydim)
-    zdim =      nc_file.createDimension('zdim',p.zdim)
-    timedim =   nc_file.createDimension('time', len(p.time_range))
+    xdim =      nc_file.createDimension('xdim', grid.xdim)
+    ydim =      nc_file.createDimension('ydim', grid.ydim)
+    zdim =      nc_file.createDimension('zdim', grid.zdim)
+    timedim =   nc_file.createDimension('time', len(GLOB_time_range))
 
     # create and assign variables xdim, ydim, zdim, and time
     # which will serve as the the chemical dimensions
     # where xdim, ydim, and zdim are first converted into meters
     # before added as variables
-    xvar = nc_file.createVariable('xdim', np.int32, ('xdim'))
-    xvar[:] = p.height/100 * np.arange(p.xdim)
+    xvar = nc_file.createGLOB_Variable('xdim', np.int32, ('xdim'))
+    xvar[:] = GLOB_height/100 * np.arange(grid.xdim)
     xvar.units = 'meters'
 
-    yvar = nc_file.createVariable('ydim', np.int32, ('ydim'))
-    yvar[:] = p.height/100 * np.arange(p.ydim)
+    yvar = nc_file.createGLOB_Variable('ydim', np.int32, ('ydim'))
+    yvar[:] = GLOB_height/100 * np.arange(grid.ydim)
     yvar.units = 'meters'
 
-    zvar = nc_file.createVariable('zdim', np.int32, ('zdim'))
-    zvar[:] = p.height/100 * np.arange(p.zdim)
+    zvar = nc_file.createGLOB_Variable('zdim', np.int32, ('zdim'))
+    zvar[:] = GLOB_height/100 * np.arange(grid.zdim)
     zvar.units = 'meters'
 
     # create the dimimension in hours
-    tiemvar = nc_file.createVariable('time', np.float32, ('time'))
-    tiemvar[:] = p.time_range
+    tiemvar = nc_file.createGLOB_Variable('time', np.float32, ('time'))
+    tiemvar[:] = GLOB_time_range
     tiemvar.units = 'hours'
 
     # create a variable for each chemical quantity with dimensions
     # time, xdim, ydim, and zdim
     cvars = dict()
     for chemical in grid.chemicals:
-        cvars[chemical] = nc_file.createVariable(chemical, np.float64, ('xdim','ydim','zdim','time'))
+        cvars[chemical] = nc_file.createGLOB_Variable(chemical, np.float64, ('xdim','ydim','zdim','time'))
         cvars[chemical].units = 'molec/cm3'
 
     # cycle over time range, writing data at each time point to the netcdf file
     t_index = 0
 
-    for t in p.time_range:
+    for t in GLOB_time_range:
         print('cycling... at t = {}'.format(t))
         # write data
         for chemical in grid.chemicals:
             cvars[chemical][:,:,:,t_index] = grid.values[chemical]
 
         # cyling emision/deposition/advection+diffusion/chemistry
-        grid.round_and_check_neg(t)
         print('emitting at time {}\n'.format(t))
-        grid.emit()
-
-        grid.round_and_check_neg(t)
+        emit(grid,case)
         print('depositing at time {}\n'.format(t))
-        grid.deposit()
-
-        grid.round_and_check_neg(t)
+        deposit(grid,case)
         print('advecting at time {}\n'.format(t))
-        grid.advect()
-
-        grid.round_and_check_neg(t)
+        advect(grid,case)
         print('chemistry at time {}\n'.format(t))
-        grid.ssc_chem(t)
+        ssc_chem(grid,t)
 
         grid.test_settings()
         t_index += 1
