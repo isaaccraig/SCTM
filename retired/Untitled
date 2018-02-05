@@ -1,0 +1,19 @@
+
+import unittest
+
+class Tests(unittest.TestCase):
+
+    def test_ohss(self):
+        params = ModelParams()
+        oh_ss = params.steady_state_func['conc_HO']
+        oh_vals = np.zeros(100)
+        nox_vals = np.arange(0.1,10.1,0.1) * params.c_m / 1e9 # 0 to 5 ppb
+        for n in range(100):
+            nox = nox_vals[n]
+            oh_vals[n] = oh_ss(nox)
+
+        plt.plot(oh_vals, nox_vals)
+        plt.title('OH steady state')
+        plt.xlabel('[NO2] in molec/cm^3')
+        plt.ylabel('[OH] in molec/cm^3')
+        plt.show()

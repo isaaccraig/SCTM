@@ -1,0 +1,109 @@
+
+
+import numpy as np
+
+def forward_time_central_space(C, u=0, v=0, w=0, BC={ '-x': 0,'+x': 0,'-y': 0,'+y': 0,'-z': 0, '+z': 0 }, del_t=0.01, del_x = 1000, del_y = 1000, del_z = 1000, D=1e4):
+
+    rx = D * del_t/(del_x^2)
+    Crx = u * del_t/(del_x)
+    ry = D * del_t/(del_y^2)
+    Cry = v * del_t/(del_y)
+    rz = D * del_t/(del_z^2)
+    Crz = v * del_t/(del_z)
+
+    diags = [      1 - 2*rx - 2*ry - 2*rz, #diag
+                        rx - Crx/2, #xsuperdiag
+                        rx + Crx/2,
+                        ry - Cry/2,
+                        ry + Cry/2,
+                        rz - Crz/2,
+                        rz + Crz/2]
+
+    return cranknicolson(C, diags, BC)
+
+def cranknicolson(C, diags, BC):
+
+    # diags in form :
+    # [diagonal,  xsuperdiag, xsubdiag,
+    #             ysuperdiag, ysubdiag,
+    #             zsuperdiag, zsubdiag]
+
+    diagonal =    diags[0]
+    xsuperdiag =  diags[1]
+    xsubdiag =    diags[2]
+    ysuperdiag =  diags[3]
+    ysubdiag =    diags[4]
+    zsuperdiag =  diags[5]
+    zsubdiag=    diags[6]
+
+    nx,ny,nz = C.shape
+    n = nx*ny*nz
+
+    xindex = lambda i: i / (ny * nz)
+    yindex = lambda i: (i%(ny * nz))/nz
+    zindex = lambda i: (i%(ny * nz))%nz
+
+    R = np.zeros([n,n])
+    L = np.zeros([n,n])
+    boundary = np.zeros(n)
+
+    flat_C = np.ones(n)
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(nz):
+                # flattens to form a vector from matrix
+                # so that can loop over the single n
+                # variable to get the relevant value
+                index = i*ny*nz + j*nz + k
+                flat_C[index] = C[i,j,k]
+
+    for i in range(n):
+      for j in range(n):
+          if i == j: # diagonal
+            R[i,j] = diagonal
+          if i + 1 == j:
+              if zindex(j) != nz - 1: # positive z boundary
+                R[i,j] = zsuperdiag
+              else:
+                boundary[i] += zsuperdiag * BC['+z']
+          if zindex(i) - 1 == zindex(j):
+              if zindex(j) != 0: # negative z boundary
+                R[i,j] = zsubdiag
+              else:
+                boundary[i] += zsubdiag * BC['-z']
+          if zindex(i) + 1 == zindex(j):
+              if yindex(j) != ny - 1:
+                R[i,j] = ysuperdiag
+              else:
+                boundary[i] += ysuperdiag * BC['+y']
+          if yindex(i) - 1 == yindex(j):
+              if yindex(j) != 0:
+                R[i,j] = ysubdiag
+              else:
+                boundary[i] += ysubdiag * BC['-y']
+          if xindex(i) + 1 == xindex(j):
+              if xindex(j) != nx - 1:
+                R[i,j] = xsuperdiag
+              else:
+                boundary[i] += xsuperdiag * BC['+x']
+          if xindex(i) - 1 == xindex(j):
+              if xindex(j) != 0:
+                R[i,j] = xsubdiag
+              else:
+                boundary[i] += xsubdiag * BC['-x']
+
+    print("right * C + boundary = {}".format(np.dot(R, flat_C) + boundary))
+
+    right = np.dot(R, flat_C) + boundary
+    flat_result = right
+    result = np.zeros([nx, ny, nz])
+
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(nz):
+                # flattens to form a vector from matrix
+                # so that can loop over the single n
+                # variable to get the relevant value
+                index = i*ny*nz + j*nz + k
+                result[i,j,k] = flat_result[index]
+    return result
