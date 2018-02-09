@@ -7,7 +7,7 @@ import pdb
 # then ghost points
 
 
-def advection_diffusion(C, u, v, w, BC, del_t, del_x, del_y, del_z, D):
+def advection_diffusion(C, u, v, w, BC, del_t, del_x, del_y, del_z, D, stop = False):
 
     rx = D * del_t/(del_x**2)
     Crx = u * del_t/(del_x)
@@ -32,9 +32,9 @@ def advection_diffusion(C, u, v, w, BC, del_t, del_x, del_y, del_z, D):
                         rz/2 - Crz/4,
                         rz/2 + Crz/4  ]
 
-    return cranknicolson(C, rightdiags, leftdiags, BC)
+    return cranknicolson(C, rightdiags, leftdiags, BC, stop)
 
-def cranknicolson(C, rightdiags, leftdiags, BC):
+def cranknicolson(C, rightdiags, leftdiags, BC, stop = False):
 
     # diags in form :
     # [diagonal,  xsuperdiag, xsubdiag,
@@ -150,6 +150,8 @@ def cranknicolson(C, rightdiags, leftdiags, BC):
                 index = i*ny*nz + j*nz + k
                 result[i,j,k] = flat_result[index]
                 #if (result[i,j,k] < 0):
-                    #pdb.set_trace();
+
+    if stop:
+        pdb.set_trace()
 
     return result

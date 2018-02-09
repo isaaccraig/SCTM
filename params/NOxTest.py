@@ -6,15 +6,15 @@ sys.path.append('../')
 from Case import *
 
 GLOB_c_m = 2.5e19 # air dens in molecules/cm3
-GLOB_U = 10
-GLOB_V = 0
+GLOB_U = 10 #m/s
+GLOB_V = 10
 GLOB_W = 0
 
 GLOB_dx = 100000 # 1km, in cm
 GLOB_dy = 100000
 GLOB_dz = 100000
 GLOB_Diff = 0 # cm^2/s
-GLOB_CN_timestep = 100 # in seconds for CN
+GLOB_CN_timestep = 6 # in seconds for CN (6 * gridsize in km)
 
 GLOB_time_step = 0.5 # in hours for operator split
 GLOB_chemical_dt = 1 # in seconds for within chem func
@@ -41,16 +41,22 @@ steady_state_func = {'conc_O3': None, 'conc_NO2': None, 'conc_NO': None, 'conc_H
 
 xdim = 5;
 ydim = 5;
-zdim = 5;
+zdim = 1;
 
-init = {'conc_NO2' : 0 * 2.5e19/1e12 * np.ones([xdim, ydim, zdim]),
-        'conc_NO'  : 0 * 2.5e19/1e12 * np.ones([xdim, ydim, zdim]),
-        'conc_O3'  : 60 * 2.5e19/1e9 * np.ones([xdim, ydim, zdim]),
-        'conc_HNO3': 0 * 2.5e19/1e12 * np.ones([xdim, ydim, zdim]),
-        'conc_HO'  : 0.3 * 2.5e19/1e12 * np.ones([xdim, ydim, zdim])}
+conc_NO = 10 * 2.5e19/1e9;
+conc_NO2 = 10 * 2.5e19/1e9;
+conc_HO = 0.3 * 2.5e19/1e12;
+conc_HNO3 = 10 * 2.5e19/1e12;
+conc_O3 = 60 * 2.5e19/1e12;
 
-init['conc_NO2'][xdim//2][ydim//2][zdim//2] = 0.5 * 2.5e19/1e9
-init['conc_NO'][xdim//2][ydim//2][zdim//2] = 0.5 * 2.5e19/1e9
+init = {'conc_NO2' : conc_NO2 * np.ones([xdim, ydim, zdim]),
+        'conc_NO'  : conc_NO * np.ones([xdim, ydim, zdim]),
+        'conc_O3'  : conc_O3 * np.ones([xdim, ydim, zdim]),
+        'conc_HNO3': conc_HNO3 * np.ones([xdim, ydim, zdim]),
+        'conc_HO'  : conc_HO * np.ones([xdim, ydim, zdim])}
+
+#init['conc_NO2'][xdim//2][ydim//2][zdim//2] = 10 * 2.5e19/1e12
+# init['conc_NO'][xdim//2][ydim//2][zdim//2] = 100 * 2.5e19/1e12
 
 emis = {'conc_NO2' : 0 * np.ones([xdim, ydim, zdim]),
         'conc_NO'  : 0 * np.ones([xdim, ydim, zdim]),
@@ -58,11 +64,11 @@ emis = {'conc_NO2' : 0 * np.ones([xdim, ydim, zdim]),
         'conc_HNO3': 0 * np.ones([xdim, ydim, zdim]),
         'conc_HO'  : 0 * np.ones([xdim, ydim, zdim])}
 
-simple_bc = {   'conc_NO2' : make_uniform_bc(0),
-                'conc_NO'  : make_uniform_bc(0),
-                'conc_O3'  : make_uniform_bc(0),
-                'conc_HNO3': make_uniform_bc(0),
-                'conc_HO'  : make_uniform_bc(0)}
+simple_bc = {   'conc_NO2' : make_uniform_bc(conc_NO2),
+                'conc_NO'  : make_uniform_bc(conc_NO),
+                'conc_O3'  : make_uniform_bc(conc_O3),
+                'conc_HNO3': make_uniform_bc(conc_HNO3),
+                'conc_HO'  : make_uniform_bc(conc_HO)}
 
 no_vd = {   'conc_NO2' : 0,
             'conc_NO'  : 0,
