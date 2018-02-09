@@ -60,6 +60,13 @@ def cranknicolson(C, rightdiags, leftdiags, BC, stop = False):
     nx,ny,nz = C.shape
     n = nx*ny*nz
 
+    BC['-x'] = np.mean(C[0,:,:])
+    BC['+x'] = np.mean(C[nx-1,:,:])
+    BC['-y'] = np.mean(C[:,0,:])
+    BC['+y'] = np.mean(C[:,ny-1,:])
+    BC['-z'] = np.mean(C[:,:,0])
+    BC['+z'] = np.mean(C[:,:,nz-1])
+
     xindex = lambda i: i // (ny * nz)
     yindex = lambda i: (i%(ny * nz))//nz
     zindex = lambda i: (i%(ny * nz))%nz
@@ -139,6 +146,10 @@ def cranknicolson(C, rightdiags, leftdiags, BC, stop = False):
 
     right = np.dot(R, flat_C) + boundary
     flat_result = np.linalg.solve(L,right)
+
+    if not (np.round(flat_C,-1) == np.round(flat_result,-1)).all():
+        pdb.set_trace()
+
     result = np.zeros([nx, ny, nz])
 
     for i in range(nx):
@@ -150,8 +161,5 @@ def cranknicolson(C, rightdiags, leftdiags, BC, stop = False):
                 index = i*ny*nz + j*nz + k
                 result[i,j,k] = flat_result[index]
                 #if (result[i,j,k] < 0):
-
-    if stop:
-        pdb.set_trace()
 
     return result

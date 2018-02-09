@@ -6,8 +6,8 @@ sys.path.append('../')
 from Case import *
 
 GLOB_c_m = 2.5e19 # air dens in molecules/cm3
-GLOB_U = 10 #m/s
-GLOB_V = 10
+GLOB_U = 5 #m/s
+GLOB_V = 0
 GLOB_W = 0
 
 GLOB_dx = 100000 # 1km, in cm
@@ -39,8 +39,8 @@ steady_state_func = {'conc_O3': None, 'conc_NO2': None, 'conc_NO': None, 'conc_H
 ##################### MAKE THE CASE ######################
 ##########################################################
 
-xdim = 5;
-ydim = 5;
+xdim = 3;
+ydim = 3;
 zdim = 1;
 
 conc_NO = 10 * 2.5e19/1e9;
@@ -55,8 +55,8 @@ init = {'conc_NO2' : conc_NO2 * np.ones([xdim, ydim, zdim]),
         'conc_HNO3': conc_HNO3 * np.ones([xdim, ydim, zdim]),
         'conc_HO'  : conc_HO * np.ones([xdim, ydim, zdim])}
 
-#init['conc_NO2'][xdim//2][ydim//2][zdim//2] = 10 * 2.5e19/1e12
-# init['conc_NO'][xdim//2][ydim//2][zdim//2] = 100 * 2.5e19/1e12
+init['conc_NO2'][xdim//2][ydim//2][zdim//2] = 30 * 2.5e19/1e9
+init['conc_NO'][xdim//2][ydim//2][zdim//2] = 30 * 2.5e19/1e9
 
 emis = {'conc_NO2' : 0 * np.ones([xdim, ydim, zdim]),
         'conc_NO'  : 0 * np.ones([xdim, ydim, zdim]),
