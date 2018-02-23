@@ -2,25 +2,28 @@
 import numpy as np
 import sys
 sys.path.append('../')
-
 from Case import *
 
 GLOB_c_m = 2.5e19 # air dens in molecules/cm3
-GLOB_U = 5 #m/s
+GLOB_consttemp = True;
+GLOB_Temp = 293;
+GLOB_U = 10/18 #m/s
 GLOB_V = 0
 GLOB_W = 0
 
-GLOB_dx = 100000 # 1km, in cm
-GLOB_dy = 100000
-GLOB_dz = 100000
-GLOB_Diff = 0 # cm^2/s
+GLOB_NegError = False;
+
+GLOB_dx = 1000 # 1km, in m
+GLOB_dy = 1000
+GLOB_dz = 1000
+GLOB_Diff = 0 # m^2/s
 GLOB_CN_timestep = 6 # in seconds for CN (6 * gridsize in km)
 
 GLOB_time_step = 0.5 # in hours for operator split
 GLOB_chemical_dt = 1 # in seconds for within chem func
 GLOB_initial_time = 12
 GLOB_final_time = 14
-GLOB_height = GLOB_dz # centimeter box GLOB_height
+GLOB_height = GLOB_dz * 100 # centimeter box GLOB_height
 GLOB_spinup_duration = 0 # hours to spin up model
 
 GLOB_orderedLabels = ['conc_O3', 'conc_NO2', 'conc_NO', 'conc_HNO3', 'conc_HO']
@@ -39,14 +42,14 @@ steady_state_func = {'conc_O3': None, 'conc_NO2': None, 'conc_NO': None, 'conc_H
 ##################### MAKE THE CASE ######################
 ##########################################################
 
-xdim = 3;
-ydim = 3;
+xdim = 7;
+ydim = 7;
 zdim = 1;
 
-conc_NO = 10 * 2.5e19/1e9;
-conc_NO2 = 10 * 2.5e19/1e9;
-conc_HO = 0.3 * 2.5e19/1e12;
-conc_HNO3 = 10 * 2.5e19/1e12;
+conc_NO = 0 * 2.5e19/1e9;
+conc_NO2 = 0 * 2.5e19/1e9;
+conc_HO = 150 * 2.5e19/1e12;
+conc_HNO3 = 0 * 2.5e19/1e12;
 conc_O3 = 60 * 2.5e19/1e12;
 
 init = {'conc_NO2' : conc_NO2 * np.ones([xdim, ydim, zdim]),

@@ -80,6 +80,7 @@ def make_realisitic_centered_NOX (xdim, ydim, zdim):
             'conc_HO2' : 23 * 2.5e19/1e12 * np.ones([xdim, ydim, zdim]),
             'conc_PROD': 0 * np.ones([xdim, ydim, zdim])
             }
+
     d['conc_NO2'][xdim//2][ydim//2][zdim//2] = 0.45 * 2.5e19/1e9
     d['conc_NO'][xdim//2][ydim//2][zdim//2] = 0.15 * 2.5e19/1e9
     return d
